@@ -99,7 +99,10 @@ ${threadSoFar}`;
     );
     const data = await response.json();
     const raw = data?.candidates?.[0]?.content?.parts?.[0]?.text;
-    if (!raw) throw new Error('Empty response from model');
+    if (!raw) {
+      console.error('Unexpected Gemini response on reply:', JSON.stringify(data));
+      throw new Error('Empty response from model');
+    }
 
     const statusMatch = raw.match(/STATUS:\s*(RESOLVED|ESCALATE)/i);
     const messageMatch = raw.match(/MESSAGE:\s*([\s\S]*)/i);

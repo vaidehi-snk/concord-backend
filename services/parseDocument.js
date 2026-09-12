@@ -83,8 +83,16 @@ ${text.slice(0, 3000)}`;
     }
   );
   const data = await response.json();
+  if (data.error) {
+    // Surface the actual reason (invalid key, quota exceeded, model not found,
+    // etc.) instead of masking it behind a generic "empty response" message.
+    throw new Error(`Gemini API error: ${data.error.message || JSON.stringify(data.error)}`);
+  }
   const raw = data?.candidates?.[0]?.content?.parts?.[0]?.text;
-  if (!raw) throw new Error('Empty response from Gemini');
+  if (!raw) {
+    console.error('Gemini returned no usable candidate. Full response:', JSON.stringify(data));
+    throw new Error('Empty response from Gemini');
+  }
 
   // Model sometimes wraps JSON in ```json fences despite instructions — strip if present.
   const cleaned = raw.replace(/```json|```/g, '').trim();
