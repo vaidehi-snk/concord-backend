@@ -53,4 +53,73 @@ Output only the email, starting with a Subject line.`;
   }
 });
 
+// POST /api/negotiate/:disputeId/reply
+// The negotiation loop: log the vendor's actual reply, then have the agent
+// decide whether the dispute is resolved or needs a follow-up — and if a
+// follow-up is needed, draft it, instead of the dispute sitting stuck after
+// one email like before. This is what makes it a loop rather than one shot.
+router.post('/:disputeId/reply', async (req, res) => {
+  try {
+    const { replyText } = req.body;
+    if (!replyText || !replyText.trim()) {
+      return res.status(400).json({ error: 'replyText is required' });
+    }
+
+    const dispute = await Dispute.findById(req.params.disputeId)
+      .populate('vendor', 'name')
+      .populate('po deliveryNote invoice');
+    if (!dispute) return res.status(404).json({ error: 'Dispute not found' });
+
+    dispute.thread.push({ direction: 'vendor_reply', body: replyText.trim() });
+
+    const threadSoFar = dispute.thread
+      .map((t) => `[${t.direction}]: ${t.body}`)
+      .join('\n\n');
+
+    const flagText = dispute.flags.map((f) => f.description).join(' ');
+    const prompt = `You are Concord's autonomous negotiation agent for a B2B invoice dispute. Below is the full email thread so far, ending with the vendor's latest reply. Decide the outcome and respond in this EXACT format, nothing else:
+
+STATUS: <one word — either RESOLVED or ESCALATE>
+MESSAGE: <if RESOLVED, a short one-sentence internal note confirming what was agreed. If ESCALATE, a professional follow-up email to the vendor (with Subject line) addressing their reply and restating the ask.>
+
+Original discrepancy: ${flagText}
+Financial impact: ₹${dispute.totalFinancialImpact}
+PO Number: ${dispute.po.docNumber || dispute.po._id}
+
+Thread so far:
+${threadSoFar}`;
+
+    const response = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${process.env.GEMINI_API_KEY}`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] }),
+      }
+    );
+    const data = await response.json();
+    const raw = data?.candidates?.[0]?.content?.parts?.[0]?.text;
+    if (!raw) throw new Error('Empty response from model');
+
+    const statusMatch = raw.match(/STATUS:\s*(RESOLVED|ESCALATE)/i);
+    const messageMatch = raw.match(/MESSAGE:\s*([\s\S]*)/i);
+    const decidedStatus = statusMatch ? statusMatch[1].toUpperCase() : 'ESCALATE';
+    const message = messageMatch ? messageMatch[1].trim() : raw.trim();
+
+    if (decidedStatus === 'RESOLVED') {
+      dispute.status = 'resolved';
+      dispute.thread.push({ direction: 'outbound_sent', body: `[Internal note] ${message}` });
+    } else {
+      dispute.status = 'awaiting_vendor';
+      dispute.thread.push({ direction: 'outbound_draft', body: message });
+    }
+
+    await dispute.save();
+    res.json({ decidedStatus, message, dispute });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to process vendor reply' });
+  }
+});
+
 module.exports = router;
