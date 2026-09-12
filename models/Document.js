@@ -15,11 +15,24 @@ const documentSchema = new mongoose.Schema(
     originalFilename: { type: String },
 
     extracted: {
-      quantity: { type: Number },
+      quantity: { type: Number }, // kept for single-item documents / backward compatibility
       unitPrice: { type: Number },
       taxPercent: { type: Number },
       totalAmount: { type: Number },
-      deliveredQuantity: { type: Number }, // relevant for DN docs only
+      deliveredQuantity: { type: Number }, // relevant for DN docs only, single-item case
+      // Real invoices usually have multiple items — this is what reconciliation
+      // actually compares against when present. Added after discovering that
+      // "the quantity" / "the unit price" as single flat fields is an
+      // ambiguous, wrong question for any document with more than one line.
+      lineItems: [
+        {
+          description: { type: String },
+          quantity: { type: Number },
+          unitPrice: { type: Number },
+          total: { type: Number },
+          _id: false,
+        },
+      ],
       raw: { type: mongoose.Schema.Types.Mixed }, // full raw parse output, for debugging bad extractions
     },
 

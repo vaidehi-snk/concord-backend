@@ -13,26 +13,6 @@ function getPdfjs() {
 
 const STANDARD_FONT_DATA_URL = path.join(__dirname, '..', 'node_modules', 'pdfjs-dist', 'standard_fonts') + '/';
 
-/**
- * Turns an uploaded PDF into the structured `extracted` fields on the
- * Document model. Two-stage strategy:
- *
- *  1. Regex extraction (fast, free, instant) — works well when a label and
- *     its value sit right next to each other in the text ("Quantity: 200").
- *  2. LLM extraction (Gemini) — used ONLY when regex found fewer than 3
- *     fields, which in practice means the document uses a table layout
- *     (column headers separated from their row values in the raw extracted
- *     text, which regex adjacency can't bridge but an LLM reading the same
- *     text can). This was proven necessary — regex alone failed on every
- *     table-formatted real invoice tested (Sliced Invoices sample, the
- *     TechSupply Ltd. PO/DN/Invoice trio, a generic PO template), which
- *     turned out to be the majority case, not an edge case.
- *
- * OCR fallback (tesseract.js) was tried and pulled out: it can only read
- * actual images, not PDF files directly, and its Node worker throws in a way
- * that bypasses normal try/catch. A real scanned-PDF pipeline needs to render
- * each PDF page to an image first — a genuine future task, not a quick fix.
- */
 async function extractTextFromPDF(filePath) {
   const pdfjs = await getPdfjs();
   const data = new Uint8Array(fs.readFileSync(filePath));
@@ -47,6 +27,8 @@ async function extractTextFromPDF(filePath) {
   return fullText;
 }
 
+// Regex still runs first for the simple, reliable, single-value fields — no
+// point paying for an LLM call to find a doc number or a clearly-labeled total.
 function extractFieldsRegex(text) {
   const num = (regex, group = 1) => {
     const m = text.match(regex);
@@ -60,16 +42,24 @@ function extractFieldsRegex(text) {
   const totalAmount = num(/(?<!sub\s)(?:grand total|total amount due|total amount|total)\s*[:\-]?\s*(?:usd\s*)?(₹|rs\.?|inr|\$)\s*([\d,]+(?:\.\d+)?)/i, 2);
   const docNumber = (text.match(/\b(?:PO|INV|DN)-[\w]+/i) || [])[0] || null;
 
-  return { quantity, unitPrice, taxPercent, totalAmount, deliveredQuantity, docNumber };
+  return { quantity, unitPrice, taxPercent, totalAmount, deliveredQuantity, docNumber, lineItems: [] };
 }
 
-// Called only when regex extraction comes up short. Sends the already-extracted
-// raw text (not the PDF itself) to Gemini and asks for the same fields back as
-// JSON — an LLM reading jumbled table text can associate "Qty" with its value
-// several words away the way a human glancing at the table would, which
-// adjacency-based regex fundamentally cannot do.
+// The actual fix for multi-line-item documents: instead of asking for a single
+// "quantity" and "unitPrice" (an ambiguous question when a document has 2+
+// items), ask for the full line-item table as an array. This is what
+// reconcile.js now compares against, item by item, instead of one flat number.
 async function callGeminiExtraction(text) {
-  const prompt = `Extract these fields from the invoice/purchase-order/delivery-note text below. Return ONLY valid JSON, no markdown, no explanation, using exactly these keys: quantity, unitPrice, taxPercent, totalAmount, deliveredQuantity, docNumber (the PO/INV/DN reference number, e.g. "PO-1042"). Use null for any field not present. Numbers only (no currency symbols or commas) for numeric fields.
+  const prompt = `Extract structured data from this invoice/purchase-order/delivery-note text. Return ONLY valid JSON, no markdown, no explanation, in this exact shape:
+{
+  "docNumber": "PO-1042 or similar reference number, or null",
+  "totalAmount": <overall document total as a number, or null>,
+  "taxPercent": <tax percentage as a number, or null>,
+  "lineItems": [
+    { "description": "<item name/description>", "quantity": <number>, "unitPrice": <number or null>, "total": <number or null> }
+  ]
+}
+Include ONE entry in lineItems per distinct product/item row in the document. If the document has only one item overall (no table), still return it as a single-entry lineItems array. Numbers only, no currency symbols or commas.
 
 TEXT:
 ${text.slice(0, 3000)}`;
@@ -81,11 +71,6 @@ ${text.slice(0, 3000)}`;
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         contents: [{ parts: [{ text: prompt }] }],
-        // temperature: 0 makes this as close to deterministic as Gemini allows —
-        // this is a data-extraction task, not creative writing, so randomness
-        // only hurts here. This was previously unset (defaulting to a
-        // creative-writing-appropriate temperature), which is the real reason
-        // the same document could parse differently between two calls.
         generationConfig: { temperature: 0 },
       }),
     }
@@ -104,20 +89,24 @@ ${text.slice(0, 3000)}`;
   return JSON.parse(cleaned);
 }
 
-// Retries once on failure (network hiccup, transient API error, bad JSON) —
-// so a single flaky call doesn't force a manual re-upload. Two attempts total.
 async function extractFieldsLLM(text) {
   let lastErr;
   for (let attempt = 1; attempt <= 2; attempt++) {
     try {
       const parsed = await callGeminiExtraction(text);
+      const lineItems = Array.isArray(parsed.lineItems) ? parsed.lineItems : [];
+      // Single-item convenience fields, derived from lineItems when there's
+      // exactly one — kept for backward compatibility with anything still
+      // reading flat quantity/unitPrice, and for the "no table" case.
+      const single = lineItems.length === 1 ? lineItems[0] : null;
       return {
-        quantity: parsed.quantity ?? null,
-        unitPrice: parsed.unitPrice ?? null,
+        quantity: single?.quantity ?? null,
+        unitPrice: single?.unitPrice ?? null,
         taxPercent: parsed.taxPercent ?? null,
         totalAmount: parsed.totalAmount ?? null,
-        deliveredQuantity: parsed.deliveredQuantity ?? null,
+        deliveredQuantity: null,
         docNumber: parsed.docNumber ?? null,
+        lineItems,
       };
     } catch (err) {
       lastErr = err;
@@ -128,7 +117,10 @@ async function extractFieldsLLM(text) {
 }
 
 function countFields(fields) {
-  return Object.values(fields).filter((v) => v !== null).length;
+  const flatCount = ['quantity', 'unitPrice', 'taxPercent', 'totalAmount', 'deliveredQuantity', 'docNumber']
+    .filter((k) => fields[k] !== null && fields[k] !== undefined).length;
+  const lineItemBonus = fields.lineItems && fields.lineItems.length > 0 ? 3 : 0;
+  return flatCount + lineItemBonus;
 }
 
 async function parseDocument(filePath) {
@@ -142,7 +134,11 @@ async function parseDocument(filePath) {
   }
 
   if (!text.trim()) {
-    return { extracted: { quantity: null, unitPrice: null, taxPercent: null, totalAmount: null, deliveredQuantity: null, docNumber: null, raw: '' }, parseStatus: 'failed', parseConfidence: 0 };
+    return {
+      extracted: { quantity: null, unitPrice: null, taxPercent: null, totalAmount: null, deliveredQuantity: null, docNumber: null, lineItems: [], raw: '' },
+      parseStatus: 'failed',
+      parseConfidence: 0,
+    };
   }
 
   let fields = extractFieldsRegex(text);
@@ -152,8 +148,6 @@ async function parseDocument(filePath) {
   if (regexFieldCount < 3 && process.env.GEMINI_API_KEY) {
     try {
       const llmFields = await extractFieldsLLM(text);
-      // Merge: prefer regex where it found something (cheaper, no hallucination
-      // risk), fill gaps from the LLM.
       fields = {
         quantity: fields.quantity ?? llmFields.quantity,
         unitPrice: fields.unitPrice ?? llmFields.unitPrice,
@@ -161,9 +155,10 @@ async function parseDocument(filePath) {
         totalAmount: fields.totalAmount ?? llmFields.totalAmount,
         deliveredQuantity: fields.deliveredQuantity ?? llmFields.deliveredQuantity,
         docNumber: fields.docNumber ?? llmFields.docNumber,
+        lineItems: llmFields.lineItems.length > 0 ? llmFields.lineItems : fields.lineItems,
       };
       usedLLM = true;
-      console.log(`LLM extraction fallback succeeded: regex found ${regexFieldCount} field(s), LLM brought it to ${countFields(fields)}.`);
+      console.log(`LLM extraction fallback succeeded: regex found ${regexFieldCount} field(s), LLM brought it to ${countFields(fields)} (${fields.lineItems.length} line item(s)).`);
     } catch (err) {
       console.warn('LLM extraction fallback failed, keeping regex-only result:', err.message);
     }
