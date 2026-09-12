@@ -68,7 +68,7 @@ function extractFieldsRegex(text) {
 // JSON — an LLM reading jumbled table text can associate "Qty" with its value
 // several words away the way a human glancing at the table would, which
 // adjacency-based regex fundamentally cannot do.
-async function extractFieldsLLM(text) {
+async function callGeminiExtraction(text) {
   const prompt = `Extract these fields from the invoice/purchase-order/delivery-note text below. Return ONLY valid JSON, no markdown, no explanation, using exactly these keys: quantity, unitPrice, taxPercent, totalAmount, deliveredQuantity, docNumber (the PO/INV/DN reference number, e.g. "PO-1042"). Use null for any field not present. Numbers only (no currency symbols or commas) for numeric fields.
 
 TEXT:
@@ -79,13 +79,19 @@ ${text.slice(0, 3000)}`;
     {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] }),
+      body: JSON.stringify({
+        contents: [{ parts: [{ text: prompt }] }],
+        // temperature: 0 makes this as close to deterministic as Gemini allows —
+        // this is a data-extraction task, not creative writing, so randomness
+        // only hurts here. This was previously unset (defaulting to a
+        // creative-writing-appropriate temperature), which is the real reason
+        // the same document could parse differently between two calls.
+        generationConfig: { temperature: 0 },
+      }),
     }
   );
   const data = await response.json();
   if (data.error) {
-    // Surface the actual reason (invalid key, quota exceeded, model not found,
-    // etc.) instead of masking it behind a generic "empty response" message.
     throw new Error(`Gemini API error: ${data.error.message || JSON.stringify(data.error)}`);
   }
   const raw = data?.candidates?.[0]?.content?.parts?.[0]?.text;
@@ -94,17 +100,31 @@ ${text.slice(0, 3000)}`;
     throw new Error('Empty response from Gemini');
   }
 
-  // Model sometimes wraps JSON in ```json fences despite instructions — strip if present.
   const cleaned = raw.replace(/```json|```/g, '').trim();
-  const parsed = JSON.parse(cleaned);
-  return {
-    quantity: parsed.quantity ?? null,
-    unitPrice: parsed.unitPrice ?? null,
-    taxPercent: parsed.taxPercent ?? null,
-    totalAmount: parsed.totalAmount ?? null,
-    deliveredQuantity: parsed.deliveredQuantity ?? null,
-    docNumber: parsed.docNumber ?? null,
-  };
+  return JSON.parse(cleaned);
+}
+
+// Retries once on failure (network hiccup, transient API error, bad JSON) —
+// so a single flaky call doesn't force a manual re-upload. Two attempts total.
+async function extractFieldsLLM(text) {
+  let lastErr;
+  for (let attempt = 1; attempt <= 2; attempt++) {
+    try {
+      const parsed = await callGeminiExtraction(text);
+      return {
+        quantity: parsed.quantity ?? null,
+        unitPrice: parsed.unitPrice ?? null,
+        taxPercent: parsed.taxPercent ?? null,
+        totalAmount: parsed.totalAmount ?? null,
+        deliveredQuantity: parsed.deliveredQuantity ?? null,
+        docNumber: parsed.docNumber ?? null,
+      };
+    } catch (err) {
+      lastErr = err;
+      console.warn(`Gemini extraction attempt ${attempt} failed:`, err.message);
+    }
+  }
+  throw lastErr;
 }
 
 function countFields(fields) {
@@ -127,8 +147,9 @@ async function parseDocument(filePath) {
 
   let fields = extractFieldsRegex(text);
   let usedLLM = false;
+  const regexFieldCount = countFields(fields);
 
-  if (countFields(fields) < 3 && process.env.GEMINI_API_KEY) {
+  if (regexFieldCount < 3 && process.env.GEMINI_API_KEY) {
     try {
       const llmFields = await extractFieldsLLM(text);
       // Merge: prefer regex where it found something (cheaper, no hallucination
@@ -142,6 +163,7 @@ async function parseDocument(filePath) {
         docNumber: fields.docNumber ?? llmFields.docNumber,
       };
       usedLLM = true;
+      console.log(`LLM extraction fallback succeeded: regex found ${regexFieldCount} field(s), LLM brought it to ${countFields(fields)}.`);
     } catch (err) {
       console.warn('LLM extraction fallback failed, keeping regex-only result:', err.message);
     }
