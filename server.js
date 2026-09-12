@@ -16,6 +16,7 @@ const documentsRouter = require('./routes/documents');
 const disputesRouter = require('./routes/disputes');
 const negotiateRouter = require('./routes/negotiate');
 const vendorsRouter = require('./routes/vendors');
+const publicRouter = require('./routes/public');
 
 const app = express();
 app.use(cors());
@@ -25,6 +26,7 @@ app.use('/api/documents', documentsRouter);
 app.use('/api/disputes', disputesRouter);
 app.use('/api/negotiate', negotiateRouter);
 app.use('/api/vendors', vendorsRouter);
+app.use('/api/public/disputes', publicRouter);
 
 app.get('/api/health', (req, res) => res.json({ ok: true }));
 

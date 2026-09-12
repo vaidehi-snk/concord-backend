@@ -1,5 +1,6 @@
 const express = require('express');
 const Vendor = require('../models/Vendor');
+const Dispute = require('../models/Dispute');
 
 const router = express.Router();
 
@@ -48,6 +49,19 @@ router.get('/', async (req, res) => {
   const filter = companyId ? { company: companyId } : {};
   const vendors = await Vendor.find(filter);
 
+  // Open disputes per vendor — needed so the UI knows when batching multiple
+  // disputes into one negotiation email is actually possible (2+ open ones).
+  const openDisputes = await Dispute.find({
+    vendor: { $in: vendors.map((v) => v._id) },
+    status: { $in: ['open', 'email_drafted'] },
+  }).select('vendor _id');
+
+  const openByVendor = {};
+  openDisputes.forEach((d) => {
+    const key = d.vendor.toString();
+    (openByVendor[key] = openByVendor[key] || []).push(d._id);
+  });
+
   const scored = vendors
     .map((v) => {
       const riskScore = computeRiskScore(v);
@@ -58,6 +72,7 @@ router.get('/', async (req, res) => {
         stats: v.stats,
         riskScore,
         riskLabel: riskLabel(riskScore),
+        openDisputeIds: openByVendor[v._id.toString()] || [],
       };
     })
     .sort((a, b) => b.riskScore - a.riskScore);

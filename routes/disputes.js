@@ -1,4 +1,5 @@
 const express = require('express');
+const crypto = require('crypto');
 const Document = require('../models/Document');
 const Dispute = require('../models/Dispute');
 const Vendor = require('../models/Vendor');
@@ -54,6 +55,7 @@ router.post('/reconcile', async (req, res) => {
       flags,
       totalFinancialImpact,
       status: 'open',
+      publicToken: crypto.randomBytes(24).toString('hex'),
     });
 
     // Keep the vendor's rolling stats in sync — this is what the Phase 8-9

@@ -43,6 +43,11 @@ const disputeSchema = new mongoose.Schema(
     },
 
     thread: [threadEntrySchema],
+
+    // A random, unguessable token — not the Mongo _id — so a vendor can open
+    // a response link without any login, and without exposing sequential
+    // internal IDs. Generated once when the dispute is created.
+    publicToken: { type: String, unique: true, sparse: true },
   },
   { timestamps: true }
 );
