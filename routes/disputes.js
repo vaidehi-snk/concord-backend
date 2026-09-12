@@ -92,4 +92,60 @@ router.get('/:id', async (req, res) => {
   res.json(dispute);
 });
 
+// GET /api/disputes/report — monthly savings/impact summary. "Savings" here
+// means the financial impact of RESOLVED disputes specifically — money that
+// was actually recovered or corrected, not just flagged. This is the number
+// that matters to a business owner, built entirely from data already
+// collected by the reconciliation engine and the negotiation loop.
+router.get('/report/summary', async (req, res) => {
+  const { companyId } = req.query;
+  const match = companyId ? { company: new (require('mongoose').Types.ObjectId)(companyId) } : {};
+
+  const monthly = await Dispute.aggregate([
+    { $match: match },
+    {
+      $group: {
+        _id: {
+          year: { $year: '$createdAt' },
+          month: { $month: '$createdAt' },
+        },
+        totalFlagged: { $sum: 1 },
+        totalFlaggedAmount: { $sum: '$totalFinancialImpact' },
+        resolvedCount: { $sum: { $cond: [{ $eq: ['$status', 'resolved'] }, 1, 0] } },
+        resolvedAmount: {
+          $sum: { $cond: [{ $eq: ['$status', 'resolved'] }, '$totalFinancialImpact', 0] },
+        },
+      },
+    },
+    { $sort: { '_id.year': 1, '_id.month': 1 } },
+  ]);
+
+  const overall = await Dispute.aggregate([
+    { $match: match },
+    {
+      $group: {
+        _id: null,
+        totalFlagged: { $sum: 1 },
+        totalFlaggedAmount: { $sum: '$totalFinancialImpact' },
+        resolvedCount: { $sum: { $cond: [{ $eq: ['$status', 'resolved'] }, 1, 0] } },
+        resolvedAmount: {
+          $sum: { $cond: [{ $eq: ['$status', 'resolved'] }, '$totalFinancialImpact', 0] },
+        },
+      },
+    },
+  ]);
+
+  res.json({
+    overall: overall[0] || { totalFlagged: 0, totalFlaggedAmount: 0, resolvedCount: 0, resolvedAmount: 0 },
+    monthly: monthly.map((m) => ({
+      year: m._id.year,
+      month: m._id.month,
+      totalFlagged: m.totalFlagged,
+      totalFlaggedAmount: m.totalFlaggedAmount,
+      resolvedCount: m.resolvedCount,
+      resolvedAmount: m.resolvedAmount,
+    })),
+  });
+});
+
 module.exports = router;
