@@ -4,6 +4,7 @@ const Document = require('../models/Document');
 const Dispute = require('../models/Dispute');
 const Vendor = require('../models/Vendor');
 const { reconcile } = require('../services/reconcile');
+const { generateCreditNotePDF } = require('../services/creditNote');
 
 const router = express.Router();
 
@@ -148,6 +149,27 @@ router.get('/report/summary', async (req, res) => {
       resolvedAmount: m.resolvedAmount,
     })),
   });
+});
+
+// GET /api/disputes/:id/credit-note — generates and streams a formatted PDF
+// credit note for this dispute. A real document, not just email text —
+// distinct from the negotiation draft, which is correspondence, not a
+// filing-ready accounting document.
+router.get('/:id/credit-note', async (req, res) => {
+  try {
+    const dispute = await Dispute.findById(req.params.id)
+      .populate('vendor', 'name')
+      .populate('po deliveryNote invoice');
+    if (!dispute) return res.status(404).json({ error: 'Dispute not found' });
+
+    const pdfBuffer = await generateCreditNotePDF(dispute);
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="credit-note-${dispute._id}.pdf"`);
+    res.send(pdfBuffer);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to generate credit note' });
+  }
 });
 
 module.exports = router;
