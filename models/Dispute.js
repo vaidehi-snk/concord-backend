@@ -38,7 +38,7 @@ const disputeSchema = new mongoose.Schema(
 
     status: {
       type: String,
-      enum: ['open', 'email_drafted', 'awaiting_vendor', 'resolved', 'dismissed'],
+      enum: ['open', 'pending_approval', 'email_drafted', 'awaiting_vendor', 'resolved', 'dismissed'],
       default: 'open',
     },
 

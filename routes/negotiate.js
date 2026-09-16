@@ -43,7 +43,11 @@ Output only the email, starting with a Subject line.`;
     }
 
     dispute.thread.push({ direction: 'outbound_draft', body: text.trim() });
-    dispute.status = 'email_drafted';
+    // Every draft now requires a manager/admin to approve before it counts
+    // as ready — this is the actual approval workflow, not a cosmetic label.
+    // A vendor never sees a draft via the response link until it's approved
+    // (enforced in routes/public.js).
+    dispute.status = 'pending_approval';
     await dispute.save();
 
     res.json({ draft: text.trim(), dispute });
@@ -53,6 +57,21 @@ Output only the email, starting with a Subject line.`;
   }
 });
 
+// POST /api/negotiate/:disputeId/approve — a manager or admin approves a
+// pending draft, making it the dispute's official position.
+router.post('/:disputeId/approve', async (req, res) => {
+  if (!['admin', 'manager'].includes(req.role)) {
+    return res.status(403).json({ error: 'Only a manager or admin can approve a draft' });
+  }
+  const dispute = await Dispute.findOne({ _id: req.params.disputeId, company: req.companyId });
+  if (!dispute) return res.status(404).json({ error: 'Dispute not found' });
+  if (dispute.status !== 'pending_approval') {
+    return res.status(400).json({ error: 'This dispute has no pending draft to approve' });
+  }
+  dispute.status = 'email_drafted';
+  await dispute.save();
+  res.json({ ok: true, dispute });
+});
 // POST /api/negotiate/:disputeId/reply
 // The negotiation loop: log the vendor's actual reply, then have the agent
 // decide whether the dispute is resolved or needs a follow-up — and if a
@@ -187,7 +206,7 @@ Output only the email, starting with a Subject line.`;
     await Promise.all(
       disputes.map((d) => {
         d.thread.push({ direction: 'outbound_draft', body: `[Part of a batched email covering ${disputes.length} disputes]\n\n${text.trim()}` });
-        d.status = 'email_drafted';
+        d.status = 'pending_approval';
         return d.save();
       })
     );

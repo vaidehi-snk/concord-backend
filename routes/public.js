@@ -15,6 +15,7 @@ const router = express.Router();
  */
 
 function publicView(dispute) {
+  const isApproved = dispute.status !== 'pending_approval';
   return {
     vendorName: dispute.vendor?.name,
     poNumber: dispute.po?.docNumber,
@@ -22,11 +23,11 @@ function publicView(dispute) {
     flags: dispute.flags.map((f) => ({ severity: f.severity, description: f.description })),
     totalFinancialImpact: dispute.totalFinancialImpact,
     status: dispute.status,
-    // Only outbound messages are shown as "the company's position" — a vendor
-    // doesn't need to see internal notes.
-    thread: dispute.thread
-      .filter((t) => t.direction !== 'outbound_sent')
-      .map((t) => ({ direction: t.direction, body: t.body, createdAt: t.createdAt })),
+    // A draft still pending manager/admin approval is not yet the company's
+    // official position — a vendor should never see it before it's approved.
+    thread: isApproved
+      ? dispute.thread.filter((t) => t.direction !== 'outbound_sent').map((t) => ({ direction: t.direction, body: t.body, createdAt: t.createdAt }))
+      : [],
   };
 }
 
