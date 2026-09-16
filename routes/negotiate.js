@@ -9,7 +9,7 @@ const router = express.Router();
 // no credit card needed).
 router.post('/:disputeId/draft', async (req, res) => {
   try {
-    const dispute = await Dispute.findById(req.params.disputeId)
+    const dispute = await Dispute.findOne({ _id: req.params.disputeId, company: req.companyId })
       .populate('vendor', 'name')
       .populate('po deliveryNote invoice');
     if (!dispute) return res.status(404).json({ error: 'Dispute not found' });
@@ -65,7 +65,7 @@ router.post('/:disputeId/reply', async (req, res) => {
       return res.status(400).json({ error: 'replyText is required' });
     }
 
-    const dispute = await Dispute.findById(req.params.disputeId)
+    const dispute = await Dispute.findOne({ _id: req.params.disputeId, company: req.companyId })
       .populate('vendor', 'name')
       .populate('po deliveryNote invoice');
     if (!dispute) return res.status(404).json({ error: 'Dispute not found' });
@@ -139,7 +139,7 @@ router.post('/batch-draft', async (req, res) => {
       return res.status(400).json({ error: 'disputeIds must be an array of at least 2 dispute IDs' });
     }
 
-    const disputes = await Dispute.find({ _id: { $in: disputeIds } })
+    const disputes = await Dispute.find({ _id: { $in: disputeIds }, company: req.companyId })
       .populate('vendor', 'name')
       .populate('po deliveryNote invoice');
 

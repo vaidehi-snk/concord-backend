@@ -7,12 +7,13 @@ const { parseDocument } = require('../services/parseDocument');
 const router = express.Router();
 const upload = multer({ dest: path.join(__dirname, '..', 'uploads') });
 
-// POST /api/documents  — upload one PO/DN/Invoice file, parse it, store the result.
-// Auth is stubbed for the MVP per the plan (one hardcoded company) — swap
-// req.body.companyId for req.user.companyId once real auth is wired in.
+// POST /api/documents — upload one PO/DN/Invoice file, parse it, store the result.
+// companyId now comes from the authenticated user's token (req.companyId,
+// set by middleware/auth.js) — not from the request body, which anyone could
+// have set to any value before real auth existed.
 router.post('/', upload.single('file'), async (req, res) => {
   try {
-    const { type, companyId, vendorId } = req.body;
+    const { type, vendorId } = req.body;
     if (!['PO', 'DN', 'INVOICE'].includes(type)) {
       return res.status(400).json({ error: 'type must be PO, DN, or INVOICE' });
     }
@@ -21,7 +22,7 @@ router.post('/', upload.single('file'), async (req, res) => {
     const parsed = await parseDocument(req.file.path);
 
     const doc = await Document.create({
-      company: companyId,
+      company: req.companyId,
       vendor: vendorId,
       type,
       fileUrl: req.file.path,
@@ -40,8 +41,7 @@ router.post('/', upload.single('file'), async (req, res) => {
 });
 
 router.get('/', async (req, res) => {
-  const { companyId } = req.query;
-  const docs = await Document.find(companyId ? { company: companyId } : {}).sort({ createdAt: -1 });
+  const docs = await Document.find({ company: req.companyId }).sort({ createdAt: -1 });
   res.json(docs);
 });
 

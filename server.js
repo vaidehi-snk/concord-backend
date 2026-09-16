@@ -17,15 +17,25 @@ const disputesRouter = require('./routes/disputes');
 const negotiateRouter = require('./routes/negotiate');
 const vendorsRouter = require('./routes/vendors');
 const publicRouter = require('./routes/public');
+const authRouter = require('./routes/auth');
+const auth = require('./middleware/auth');
 
 const app = express();
 app.use(cors());
 app.use(express.json());
 
-app.use('/api/documents', documentsRouter);
-app.use('/api/disputes', disputesRouter);
-app.use('/api/negotiate', negotiateRouter);
-app.use('/api/vendors', vendorsRouter);
+app.use('/api/auth', authRouter);
+
+// Everything below requires a valid token — companyId/vendorId now come from
+// the authenticated user (req.companyId), not from whatever the client sends.
+app.use('/api/documents', auth, documentsRouter);
+app.use('/api/disputes', auth, disputesRouter);
+app.use('/api/negotiate', auth, negotiateRouter);
+app.use('/api/vendors', auth, vendorsRouter);
+
+// The vendor-facing response link is intentionally public — a vendor has no
+// Concord account, so it can't require a token. Access is instead controlled
+// by the unguessable per-dispute token in the URL itself.
 app.use('/api/public/disputes', publicRouter);
 
 app.get('/api/health', (req, res) => res.json({ ok: true }));

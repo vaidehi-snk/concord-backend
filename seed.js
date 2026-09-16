@@ -1,25 +1,32 @@
 require('dotenv').config();
 const mongoose = require('mongoose');
+const bcrypt = require('bcryptjs');
 const connectDB = require('./config/db');
 const Company = require('./models/Company');
+const User = require('./models/User');
 const Vendor = require('./models/Vendor');
 
-// Auth isn't built yet (by design, per the MVP scope). This script creates one
-// demo Company and Vendor so the frontend has real IDs to work against.
+// Real auth now exists — you can just use the Register page instead of this
+// script for a normal account. This is kept as a quick way to get a working
+// login + a sample vendor for local testing without clicking through the UI.
 // Run with: node seed.js
+const DEMO_EMAIL = 'demo@concord.local';
+const DEMO_PASSWORD = 'demopassword123';
+
 async function seed() {
   await connectDB();
 
-  let company = await Company.findOne({ email: 'demo@concord.local' });
-  if (!company) {
-    company = await Company.create({
-      name: 'Demo Company Pvt. Ltd.',
-      email: 'demo@concord.local',
-      passwordHash: 'not-used-yet',
-    });
-    console.log('Created company:', company._id.toString());
+  let user = await User.findOne({ email: DEMO_EMAIL });
+  let company;
+
+  if (!user) {
+    company = await Company.create({ name: 'Demo Company Pvt. Ltd.', email: DEMO_EMAIL, passwordHash: 'unused' });
+    const passwordHash = await bcrypt.hash(DEMO_PASSWORD, 10);
+    user = await User.create({ company: company._id, name: 'Demo Admin', email: DEMO_EMAIL, passwordHash, role: 'admin' });
+    console.log('Created demo account.');
   } else {
-    console.log('Using existing company:', company._id.toString());
+    company = await mongoose.model('Company').findById(user.company);
+    console.log('Demo account already exists.');
   }
 
   let vendor = await Vendor.findOne({ company: company._id, name: 'Sample Vendor Pvt. Ltd.' });
@@ -29,14 +36,12 @@ async function seed() {
       name: 'Sample Vendor Pvt. Ltd.',
       contactEmail: 'accounts@samplevendor.example',
     });
-    console.log('Created vendor:', vendor._id.toString());
-  } else {
-    console.log('Using existing vendor:', vendor._id.toString());
+    console.log('Created a sample vendor.');
   }
 
-  console.log('\nPaste these into the frontend Settings screen:');
-  console.log('  Company ID:', company._id.toString());
-  console.log('  Vendor ID :', vendor._id.toString());
+  console.log('\nLog in at /login with:');
+  console.log('  Email   :', DEMO_EMAIL);
+  console.log('  Password:', DEMO_PASSWORD);
 
   await mongoose.disconnect();
 }

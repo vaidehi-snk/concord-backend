@@ -45,9 +45,7 @@ function riskLabel(score) {
 
 // GET /api/vendors — the scorecard list, sorted riskiest first
 router.get('/', async (req, res) => {
-  const { companyId } = req.query;
-  const filter = companyId ? { company: companyId } : {};
-  const vendors = await Vendor.find(filter);
+  const vendors = await Vendor.find({ company: req.companyId });
 
   // Open disputes per vendor — needed so the UI knows when batching multiple
   // disputes into one negotiation email is actually possible (2+ open ones).
@@ -78,6 +76,16 @@ router.get('/', async (req, res) => {
     .sort((a, b) => b.riskScore - a.riskScore);
 
   res.json(scored);
+});
+
+// POST /api/vendors — create a new vendor under the authenticated company.
+// Previously vendors could only come from seed.js; real accounts need to be
+// able to add their own vendors as they start uploading real documents.
+router.post('/', async (req, res) => {
+  const { name, contactEmail } = req.body;
+  if (!name) return res.status(400).json({ error: 'name is required' });
+  const vendor = await Vendor.create({ company: req.companyId, name, contactEmail });
+  res.status(201).json(vendor);
 });
 
 module.exports = router;

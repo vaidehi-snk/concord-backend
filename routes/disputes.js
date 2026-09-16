@@ -15,11 +15,12 @@ const router = express.Router();
 // on the frontend calls once real ingestion (Week 2-3) is wired to the UI.
 router.post('/reconcile', async (req, res) => {
   try {
-    const { poId, deliveryNoteId, invoiceId, companyId, vendorId } = req.body;
+    const { poId, deliveryNoteId, invoiceId, vendorId } = req.body;
+    const companyId = req.companyId;
     const [po, deliveryNote, invoice] = await Promise.all([
-      Document.findById(poId),
-      Document.findById(deliveryNoteId),
-      Document.findById(invoiceId),
+      Document.findOne({ _id: poId, company: companyId }),
+      Document.findOne({ _id: deliveryNoteId, company: companyId }),
+      Document.findOne({ _id: invoiceId, company: companyId }),
     ]);
     if (!po || !deliveryNote || !invoice) {
       return res.status(404).json({ error: 'One or more documents not found' });
@@ -75,9 +76,8 @@ router.post('/reconcile', async (req, res) => {
 
 // GET /api/disputes — dashboard list, newest first
 router.get('/', async (req, res) => {
-  const { companyId, status } = req.query;
-  const filter = {};
-  if (companyId) filter.company = companyId;
+  const { status } = req.query;
+  const filter = { company: req.companyId };
   if (status) filter.status = status;
   const disputes = await Dispute.find(filter)
     .populate('vendor', 'name')
@@ -88,7 +88,7 @@ router.get('/', async (req, res) => {
 
 // GET /api/disputes/:id — single dispute detail, for the dispute detail page
 router.get('/:id', async (req, res) => {
-  const dispute = await Dispute.findById(req.params.id)
+  const dispute = await Dispute.findOne({ _id: req.params.id, company: req.companyId })
     .populate('vendor', 'name contactEmail')
     .populate('po deliveryNote invoice');
   if (!dispute) return res.status(404).json({ error: 'Dispute not found' });
@@ -101,8 +101,7 @@ router.get('/:id', async (req, res) => {
 // that matters to a business owner, built entirely from data already
 // collected by the reconciliation engine and the negotiation loop.
 router.get('/report/summary', async (req, res) => {
-  const { companyId } = req.query;
-  const match = companyId ? { company: new (require('mongoose').Types.ObjectId)(companyId) } : {};
+  const match = { company: new (require('mongoose').Types.ObjectId)(req.companyId) };
 
   const monthly = await Dispute.aggregate([
     { $match: match },
@@ -157,7 +156,7 @@ router.get('/report/summary', async (req, res) => {
 // filing-ready accounting document.
 router.get('/:id/credit-note', async (req, res) => {
   try {
-    const dispute = await Dispute.findById(req.params.id)
+    const dispute = await Dispute.findOne({ _id: req.params.id, company: req.companyId })
       .populate('vendor', 'name')
       .populate('po deliveryNote invoice');
     if (!dispute) return res.status(404).json({ error: 'Dispute not found' });
