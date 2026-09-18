@@ -17,7 +17,8 @@ const flagSchema = new mongoose.Schema(
 // "negotiation loop" appends to, instead of the dispute only ever having one draft.
 const threadEntrySchema = new mongoose.Schema(
   {
-    direction: { type: String, enum: ['outbound_draft', 'outbound_sent', 'vendor_reply'], required: true },
+    direction: { type: String, enum: ['outbound_draft', 'outbound_sent', 'vendor_reply', 'approved'], required: true },
+    actorName: { type: String }, // who did this — a person's name for human actions (approval), omitted for AI/vendor actions
     body: { type: String, required: true },
     createdAt: { type: Date, default: Date.now },
   },

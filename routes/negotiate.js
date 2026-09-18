@@ -1,5 +1,6 @@
 const express = require('express');
 const Dispute = require('../models/Dispute');
+const User = require('../models/User');
 
 const router = express.Router();
 
@@ -68,6 +69,12 @@ router.post('/:disputeId/approve', async (req, res) => {
   if (dispute.status !== 'pending_approval') {
     return res.status(400).json({ error: 'This dispute has no pending draft to approve' });
   }
+  const approver = await User.findById(req.userId);
+  dispute.thread.push({
+    direction: 'approved',
+    body: `Draft approved and released to the vendor.`,
+    actorName: approver?.name || 'Unknown',
+  });
   dispute.status = 'email_drafted';
   await dispute.save();
   res.json({ ok: true, dispute });

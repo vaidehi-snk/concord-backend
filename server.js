@@ -18,6 +18,7 @@ const negotiateRouter = require('./routes/negotiate');
 const vendorsRouter = require('./routes/vendors');
 const publicRouter = require('./routes/public');
 const authRouter = require('./routes/auth');
+const auditTrailRouter = require('./routes/auditTrail');
 const auth = require('./middleware/auth');
 
 const app = express();
@@ -32,6 +33,7 @@ app.use('/api/documents', auth, documentsRouter);
 app.use('/api/disputes', auth, disputesRouter);
 app.use('/api/negotiate', auth, negotiateRouter);
 app.use('/api/vendors', auth, vendorsRouter);
+app.use('/api/audit-trail', auth, auditTrailRouter);
 
 // The vendor-facing response link is intentionally public — a vendor has no
 // Concord account, so it can't require a token. Access is instead controlled
