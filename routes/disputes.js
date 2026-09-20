@@ -101,7 +101,11 @@ router.get('/:id', async (req, res) => {
 // that matters to a business owner, built entirely from data already
 // collected by the reconciliation engine and the negotiation loop.
 router.get('/report/summary', async (req, res) => {
-  const match = { company: new (require('mongoose').Types.ObjectId)(req.companyId) };
+  // Mongoose casts a valid ID string automatically in queries — the manual
+  // ObjectId construction here was unnecessary and crashed with a BSONError
+  // whenever req.companyId wasn't in exactly the shape `new ObjectId()`
+  // expects, which is more fragile than just letting Mongoose handle it.
+  const match = { company: req.companyId };
 
   const monthly = await Dispute.aggregate([
     { $match: match },

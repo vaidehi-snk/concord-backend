@@ -71,11 +71,20 @@ function compareLineItems(poItems, invoiceItems) {
 
 function compareDeliveryPerItem(invoiceItems, dnItems) {
   const flags = [];
+  let uncheckedCount = 0;
+
   invoiceItems.forEach((invItem) => {
     const dnItem = findMatch(invItem, dnItems);
     const delivered = dnItem?.quantity;
     const billed = invItem.quantity;
-    if (delivered == null || billed == null) return;
+    if (delivered == null || billed == null) {
+      // Previously this silently returned — meaning a Delivery Note that
+      // failed to parse produced NO signal at all, which is what caused a
+      // real dispute (a 6-unit shortfall) to be reported as "all match."
+      // A check that couldn't run must say so, not go quiet.
+      uncheckedCount++;
+      return;
+    }
     if (delivered !== billed) {
       const shortfall = billed - delivered;
       const impact = Math.abs(shortfall) * (invItem.unitPrice || 0);
@@ -87,6 +96,18 @@ function compareDeliveryPerItem(invoiceItems, dnItems) {
       });
     }
   });
+
+  // If every item's delivery check was unverifiable (the DN didn't parse
+  // usefully at all), say so explicitly rather than reporting a clean match.
+  if (uncheckedCount > 0 && uncheckedCount === invoiceItems.length) {
+    flags.push({
+      severity: 'MED',
+      field: 'deliveredQuantity',
+      description: `Could not verify delivered quantities — the Delivery Note did not parse with usable item data. This is not confirmation that delivery matches the invoice.`,
+      financialImpact: 0,
+    });
+  }
+
   return flags;
 }
 
