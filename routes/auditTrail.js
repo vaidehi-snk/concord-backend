@@ -14,8 +14,10 @@ const router = express.Router();
 const ACTION_LABELS = {
   outbound_draft: 'AI drafted settlement email',
   approved: 'Manager/admin approved draft',
-  outbound_sent: 'Internal note',
+  outbound_sent: 'Email sent to vendor',
   vendor_reply: 'Vendor replied',
+  note: 'Internal note',
+  system: 'Concord engine',
 };
 
 function csvEscape(value) {
@@ -33,7 +35,7 @@ router.get('/export', async (req, res) => {
     .populate('po deliveryNote invoice', 'docNumber');
 
   const rows = [
-    ['Timestamp', 'Dispute ID', 'Vendor', 'PO Number', 'Invoice Number', 'Action', 'Actor', 'Details', 'Financial Impact (Rs.)', 'Dispute Status at Export'],
+    ['Timestamp', 'Dispute', 'Vendor', 'PO Number', 'Invoice Number', 'Action', 'Actor', 'Details', 'Financial Impact (Rs.)', 'Dispute Status at Export'],
   ];
 
   disputes.forEach((d) => {
@@ -42,12 +44,12 @@ router.get('/export', async (req, res) => {
     d.thread.forEach((entry) => {
       rows.push([
         new Date(entry.createdAt).toISOString(),
-        d._id.toString(),
+        d.reference || d._id.toString(),
         d.vendor?.name || '',
         d.po?.docNumber || '',
         d.invoice?.docNumber || '',
         ACTION_LABELS[entry.direction] || entry.direction,
-        entry.actorName || (entry.direction === 'outbound_draft' ? 'AI Negotiation Agent' : entry.direction === 'vendor_reply' ? 'Vendor' : ''),
+        entry.actorName || (entry.direction === 'outbound_draft' ? `Concord agent (${entry.generatedBy || 'llm'})` : entry.direction === 'vendor_reply' ? 'Vendor' : 'Concord'),
         entry.body.replace(/\n/g, ' ').slice(0, 300),
         d.totalFinancialImpact,
         d.status,

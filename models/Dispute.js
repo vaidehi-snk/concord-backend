@@ -1,25 +1,35 @@
 const mongoose = require('mongoose');
 
-// A Dispute is created by the reconciliation engine (services/reconcile.js) whenever
-// it finds a mismatch across a PO/DN/Invoice trio. This is the object the dashboard
-// lists, the negotiation agent drafts emails against, and the risk scorecard aggregates.
+// Every flag carries the evidence that produced it (expected vs actual and
+// which document each came from), so "Explain this flag" and the audit trail
+// never have to reverse-engineer a sentence.
 const flagSchema = new mongoose.Schema(
   {
+    code: { type: String }, // e.g. SHORT_DELIVERY, PRICE_MISMATCH, GSTIN_INVALID
     severity: { type: String, enum: ['HIGH', 'MED', 'LOW'], required: true },
-    field: { type: String, required: true }, // e.g. "quantity", "unitPrice", "taxPercent"
+    field: { type: String, required: true },
+    item: { type: String },
     description: { type: String, required: true },
+    expected: { type: mongoose.Schema.Types.Mixed },
+    actual: { type: mongoose.Schema.Types.Mixed },
+    expectedSource: { type: String },
+    actualSource: { type: String },
+    formula: { type: String },
     financialImpact: { type: Number, default: 0 },
   },
   { _id: false }
 );
 
-// One entry per email/reply in the negotiation thread — this is what Phase 8-9's
-// "negotiation loop" appends to, instead of the dispute only ever having one draft.
 const threadEntrySchema = new mongoose.Schema(
   {
-    direction: { type: String, enum: ['outbound_draft', 'outbound_sent', 'vendor_reply', 'approved'], required: true },
-    actorName: { type: String }, // who did this — a person's name for human actions (approval), omitted for AI/vendor actions
+    direction: {
+      type: String,
+      enum: ['outbound_draft', 'outbound_sent', 'vendor_reply', 'approved', 'note', 'system'],
+      required: true,
+    },
+    actorName: { type: String },
     body: { type: String, required: true },
+    generatedBy: { type: String }, // 'llm' | 'template' — honest about where a draft came from
     createdAt: { type: Date, default: Date.now },
   },
   { _id: false }
@@ -29,25 +39,33 @@ const disputeSchema = new mongoose.Schema(
   {
     company: { type: mongoose.Schema.Types.ObjectId, ref: 'Company', required: true },
     vendor: { type: mongoose.Schema.Types.ObjectId, ref: 'Vendor', required: true },
+    match: { type: mongoose.Schema.Types.ObjectId, ref: 'Match' },
+    reference: { type: String }, // human-friendly id, e.g. DSP-0042
 
-    po: { type: mongoose.Schema.Types.ObjectId, ref: 'Document', required: true },
-    deliveryNote: { type: mongoose.Schema.Types.ObjectId, ref: 'Document', required: true },
+    po: { type: mongoose.Schema.Types.ObjectId, ref: 'Document' },
+    deliveryNote: { type: mongoose.Schema.Types.ObjectId, ref: 'Document' },
     invoice: { type: mongoose.Schema.Types.ObjectId, ref: 'Document', required: true },
 
     flags: [flagSchema],
-    totalFinancialImpact: { type: Number, default: 0 }, // sum of flags[].financialImpact, kept denormalized for sorting
+    totalFinancialImpact: { type: Number, default: 0 },
+    recoveredAmount: { type: Number, default: 0 },
+    priority: { type: String, enum: ['high', 'medium', 'low'], default: 'medium' },
 
     status: {
       type: String,
       enum: ['open', 'pending_approval', 'email_drafted', 'awaiting_vendor', 'resolved', 'dismissed'],
       default: 'open',
     },
+    assignee: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+    resolution: {
+      outcome: { type: String, enum: ['credit_note', 'revised_invoice', 'short_payment', 'vendor_justified', 'written_off', 'other'] },
+      note: { type: String },
+      resolvedBy: { type: String },
+      resolvedAt: { type: Date },
+    },
+    dueDate: { type: Date }, // SLA: when the vendor should have answered by
 
     thread: [threadEntrySchema],
-
-    // A random, unguessable token — not the Mongo _id — so a vendor can open
-    // a response link without any login, and without exposing sequential
-    // internal IDs. Generated once when the dispute is created.
     publicToken: { type: String, unique: true, sparse: true },
   },
   { timestamps: true }

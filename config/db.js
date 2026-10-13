@@ -1,10 +1,16 @@
 const mongoose = require('mongoose');
 
-async function connectDB() {
+// Never log the full connection string — it contains the database password,
+// and Render's logs are visible to anyone with dashboard access.
+function redact(uri) {
+  return uri.replace(/\/\/([^:]+):([^@]+)@/, '//$1:****@');
+}
+
+async function connectDB(uriOverride) {
+  const uri = uriOverride || process.env.MONGO_URI || 'mongodb://localhost:27017/concord';
   try {
-    const uri = process.env.MONGO_URI || 'mongodb://localhost:27017/concord';
     await mongoose.connect(uri);
-    console.log('MongoDB connected:', uri);
+    console.log('MongoDB connected:', redact(uri));
   } catch (err) {
     console.error('MongoDB connection failed:', err.message);
     process.exit(1);

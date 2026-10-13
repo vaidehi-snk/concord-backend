@@ -5,10 +5,15 @@ services:
     plan: free
     buildCommand: npm install
     startCommand: npm start
+    healthCheckPath: /api/health
     envVars:
       - key: MONGO_URI
         sync: false
+      - key: JWT_SECRET
+        generateValue: true
       - key: GEMINI_API_KEY
         sync: false
-      - key: PORT
-        value: 5000
+      - key: GEMINI_MODEL
+        sync: false
+      - key: CORS_ORIGINS
+        sync: false
