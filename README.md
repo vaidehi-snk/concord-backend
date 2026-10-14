@@ -66,3 +66,7 @@ GET  /api/public/disputes/:token    POST /api/public/disputes/:token/respond
 ## Known limits
 
 Photos and scanned PDFs need `GEMINI_API_KEY`; without it they're marked unreadable (digital PDFs still work). Emails to vendors are sent from the user's own mailbox (mailto / copy / WhatsApp) rather than by the server. Tally ledger names default to "Purchase Returns" and "Input GST" (override with `?purchaseLedger=&taxLedger=`).
+
+## License
+
+MIT, see [LICENSE](LICENSE). Copyright (c) 2026 Vaidehi Kakad.
